@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,9 +19,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { leads, Lead } from "@/data/mockData";
-import { Search, Plus, Filter, Download } from "lucide-react";
+import { api, Lead } from "@/lib/api";
+import { Search, Plus, Filter, Download, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { useToast } from "@/hooks/use-toast";
 
 const statusColor: Record<string, string> = {
   new: "bg-info/10 text-info border-info/20",
@@ -46,17 +47,44 @@ function ScoreBadge({ score }: { score: number }) {
   );
 }
 
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function timeAgo(dateStr: string): string {
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 export default function Leads() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
-  const filtered = leads.filter((l) => {
-    const matchesSearch =
-      l.name.toLowerCase().includes(search.toLowerCase()) ||
-      l.company.toLowerCase().includes(search.toLowerCase());
-    const matchesStatus = statusFilter === "all" || l.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  useEffect(() => {
+    async function fetchLeads() {
+      try {
+        setLoading(true);
+        const data = await api.getLeads({ status: statusFilter, search: search || undefined });
+        setLeads(data);
+      } catch (e: any) {
+        toast({ title: "Failed to load leads", description: e.message, variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    }
+    const debounce = setTimeout(fetchLeads, 300);
+    return () => clearTimeout(debounce);
+  }, [search, statusFilter]);
 
   return (
     <DashboardLayout title="Leads" subtitle="Manage and track your sales leads">
@@ -104,53 +132,59 @@ export default function Leads() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Lead</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Score</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Status</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider hidden md:table-cell">Source</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider hidden lg:table-cell">Value</TableHead>
-                    <TableHead className="text-[11px] font-semibold uppercase tracking-wider hidden lg:table-cell">Last Activity</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((lead) => (
-                    <TableRow key={lead.id} className="cursor-pointer">
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                            {lead.name.split(" ").map((n) => n[0]).join("")}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium">{lead.name}</p>
-                            <p className="text-xs text-muted-foreground">{lead.company}</p>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell><ScoreBadge score={lead.score} /></TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`text-[10px] ${statusColor[lead.status]}`}>
-                          {lead.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{lead.source}</TableCell>
-                      <TableCell className="hidden lg:table-cell text-xs font-medium">{lead.value}</TableCell>
-                      <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">{lead.lastActivity}</TableCell>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Lead</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Score</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider">Status</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider hidden md:table-cell">Source</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider hidden lg:table-cell">Value</TableHead>
+                      <TableHead className="text-[11px] font-semibold uppercase tracking-wider hidden lg:table-cell">Updated</TableHead>
                     </TableRow>
-                  ))}
-                  {filtered.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-sm text-muted-foreground">
-                        No leads found matching your criteria.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {leads.map((lead) => (
+                      <TableRow key={lead.id} className="cursor-pointer">
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                              {lead.name.split(" ").map((n) => n[0]).join("")}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium">{lead.name}</p>
+                              <p className="text-xs text-muted-foreground">{lead.company}</p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell><ScoreBadge score={lead.score} /></TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-[10px] ${statusColor[lead.status]}`}>
+                            {lead.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-xs text-muted-foreground">{lead.source}</TableCell>
+                        <TableCell className="hidden lg:table-cell text-xs font-medium">{formatCurrency(lead.value)}</TableCell>
+                        <TableCell className="hidden lg:table-cell text-xs text-muted-foreground">{timeAgo(lead.updated_at)}</TableCell>
+                      </TableRow>
+                    ))}
+                    {leads.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-8 text-sm text-muted-foreground">
+                          No leads found matching your criteria.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       </motion.div>
