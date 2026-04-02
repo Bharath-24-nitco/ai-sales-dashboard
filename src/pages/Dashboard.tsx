@@ -1,9 +1,10 @@
+import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { StatCard } from "@/components/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Users, DollarSign, Target, TrendingUp } from "lucide-react";
-import { leads, monthlyRevenue, pipelineData, leadSources } from "@/data/mockData";
+import { Users, DollarSign, Target, TrendingUp, Loader2 } from "lucide-react";
+import { api, Lead, DashboardStats } from "@/lib/api";
 import {
   BarChart,
   Bar,
@@ -19,13 +20,7 @@ import {
   Area,
 } from "recharts";
 import { motion } from "framer-motion";
-
-const stats = [
-  { title: "Total Leads", value: "2,847", change: "+12.5%", trend: "up" as const, icon: Users },
-  { title: "Revenue Pipeline", value: "$1.9M", change: "+8.2%", trend: "up" as const, icon: DollarSign },
-  { title: "Conversion Rate", value: "24.3%", change: "+3.1%", trend: "up" as const, icon: Target },
-  { title: "Avg Deal Size", value: "$52.4K", change: "-2.1%", trend: "down" as const, icon: TrendingUp },
-];
+import { useToast } from "@/hooks/use-toast";
 
 const statusColor: Record<string, string> = {
   new: "bg-info/10 text-info",
@@ -36,7 +31,111 @@ const statusColor: Record<string, string> = {
   lost: "bg-destructive/10 text-destructive",
 };
 
+const SOURCE_COLORS = [
+  "hsl(217, 91%, 50%)",
+  "hsl(142, 71%, 45%)",
+  "hsl(38, 92%, 50%)",
+  "hsl(280, 67%, 55%)",
+  "hsl(199, 89%, 48%)",
+  "hsl(350, 80%, 55%)",
+];
+
+function formatCurrency(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value}`;
+}
+
+function timeAgo(dateStr: string): string {
+  const now = new Date();
+  const date = new Date(dateStr);
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 export default function Dashboard() {
+  const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
+  const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true);
+        const [statsData, leadsData] = await Promise.all([
+          api.getDashboardStats(),
+          api.getLeads(),
+        ]);
+        setDashStats(statsData);
+        setRecentLeads(leadsData.slice(0, 5));
+      } catch (e: any) {
+        toast({ title: "Failed to load dashboard", description: e.message, variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, []);
+
+  const stats = [
+    {
+      title: "Total Leads",
+      value: dashStats ? dashStats.total_leads.toLocaleString() : "—",
+      change: "+0%",
+      trend: "up" as const,
+      icon: Users,
+    },
+    {
+      title: "Revenue Pipeline",
+      value: dashStats ? formatCurrency(dashStats.pipeline_value) : "—",
+      change: "+0%",
+      trend: "up" as const,
+      icon: DollarSign,
+    },
+    {
+      title: "Conversion Rate",
+      value: dashStats ? `${dashStats.conversion_rate.toFixed(1)}%` : "—",
+      change: "+0%",
+      trend: "up" as const,
+      icon: Target,
+    },
+    {
+      title: "Avg Deal Size",
+      value: dashStats ? formatCurrency(dashStats.avg_deal_size) : "—",
+      change: "+0%",
+      trend: "up" as const,
+      icon: TrendingUp,
+    },
+  ];
+
+  // Transform API data for charts
+  const leadSourcesChart = dashStats
+    ? Object.entries(dashStats.leads_by_source).map(([name, value], i) => ({
+        name,
+        value,
+        color: SOURCE_COLORS[i % SOURCE_COLORS.length],
+      }))
+    : [];
+
+  const pipelineChart = dashStats?.pipeline_stages ?? [];
+  const revenueChart = dashStats?.monthly_revenue ?? [];
+
+  if (loading) {
+    return (
+      <DashboardLayout title="Dashboard" subtitle="Welcome back, Bharath">
+        <div className="flex items-center justify-center py-24">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout title="Dashboard" subtitle="Welcome back, Bharath">
       {/* KPI Cards */}
@@ -59,33 +158,37 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-semibold">Revenue & Leads Trend</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={monthlyRevenue}>
-                  <defs>
-                    <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(217, 91%, 50%)" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="hsl(217, 91%, 50%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(214, 20%, 90%)" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "1px solid hsl(214, 20%, 90%)",
-                      fontSize: "12px",
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="hsl(217, 91%, 50%)"
-                    fill="url(#revGrad)"
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {revenueChart.length > 0 ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <AreaChart data={revenueChart}>
+                    <defs>
+                      <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="hsl(217, 91%, 50%)" stopOpacity={0.15} />
+                        <stop offset="95%" stopColor="hsl(217, 91%, 50%)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(214, 20%, 90%)" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
+                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "1px solid hsl(214, 20%, 90%)",
+                        fontSize: "12px",
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="hsl(217, 91%, 50%)"
+                      fill="url(#revGrad)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-12">No revenue data yet</p>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -100,44 +203,50 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-semibold">Lead Sources</CardTitle>
             </CardHeader>
             <CardContent className="flex items-center justify-center">
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={leadSources}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    dataKey="value"
-                    paddingAngle={3}
-                    stroke="none"
-                  >
-                    {leadSources.map((entry, i) => (
-                      <Cell key={i} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "1px solid hsl(214, 20%, 90%)",
-                      fontSize: "12px",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              {leadSourcesChart.length > 0 ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie
+                      data={leadSourcesChart}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={55}
+                      outerRadius={85}
+                      dataKey="value"
+                      paddingAngle={3}
+                      stroke="none"
+                    >
+                      {leadSourcesChart.map((entry, i) => (
+                        <Cell key={i} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "1px solid hsl(214, 20%, 90%)",
+                        fontSize: "12px",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground py-12">No source data yet</p>
+              )}
             </CardContent>
-            <div className="px-5 pb-4 flex flex-wrap gap-3">
-              {leadSources.map((s) => (
-                <div key={s.name} className="flex items-center gap-1.5 text-[11px]">
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ background: s.color }}
-                  />
-                  <span className="text-muted-foreground">{s.name}</span>
-                  <span className="font-medium">{s.value}%</span>
-                </div>
-              ))}
-            </div>
+            {leadSourcesChart.length > 0 && (
+              <div className="px-5 pb-4 flex flex-wrap gap-3">
+                {leadSourcesChart.map((s) => (
+                  <div key={s.name} className="flex items-center gap-1.5 text-[11px]">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ background: s.color }}
+                    />
+                    <span className="text-muted-foreground">{s.name}</span>
+                    <span className="font-medium">{s.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </motion.div>
       </div>
@@ -154,21 +263,25 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-semibold">Pipeline Stages</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={pipelineData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(214, 20%, 90%)" />
-                  <XAxis dataKey="stage" tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "1px solid hsl(214, 20%, 90%)",
-                      fontSize: "12px",
-                    }}
-                  />
-                  <Bar dataKey="count" fill="hsl(217, 91%, 50%)" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {pipelineChart.length > 0 ? (
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={pipelineChart}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(214, 20%, 90%)" />
+                    <XAxis dataKey="stage" tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
+                    <YAxis tick={{ fontSize: 11 }} stroke="hsl(215, 13%, 50%)" />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "1px solid hsl(214, 20%, 90%)",
+                        fontSize: "12px",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="hsl(217, 91%, 50%)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-12">No pipeline data yet</p>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -183,26 +296,30 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-semibold">Recent Leads</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {leads.slice(0, 5).map((lead) => (
-                <div
-                  key={lead.id}
-                  className="flex items-center gap-3 rounded-lg p-2.5 hover:bg-secondary/50 transition-colors"
-                >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                    {lead.name.split(" ").map((n) => n[0]).join("")}
+              {recentLeads.length > 0 ? (
+                recentLeads.map((lead) => (
+                  <div
+                    key={lead.id}
+                    className="flex items-center gap-3 rounded-lg p-2.5 hover:bg-secondary/50 transition-colors"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                      {lead.name.split(" ").map((n) => n[0]).join("")}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{lead.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {lead.company} · {timeAgo(lead.updated_at)}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className={`text-[10px] ${statusColor[lead.status]}`}>
+                      {lead.status}
+                    </Badge>
+                    <span className="text-xs font-semibold text-primary">{lead.score}</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{lead.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {lead.company} · {lead.lastActivity}
-                    </p>
-                  </div>
-                  <Badge variant="secondary" className={`text-[10px] ${statusColor[lead.status]}`}>
-                    {lead.status}
-                  </Badge>
-                  <span className="text-xs font-semibold text-primary">{lead.score}</span>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-8">No leads yet</p>
+              )}
             </CardContent>
           </Card>
         </motion.div>
